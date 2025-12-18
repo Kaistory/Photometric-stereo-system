@@ -16,7 +16,7 @@ const char* mqtt_password = "r8>!lHMZ37RYzy?5<Sxv";
 const char* topic_control_prefix = "esp32/controlled/";
 
 // ================= WS2812 CONFIG =================
-#define LED_PIN     5
+#define LED_PIN     0
 #define LED_COUNT   24
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);

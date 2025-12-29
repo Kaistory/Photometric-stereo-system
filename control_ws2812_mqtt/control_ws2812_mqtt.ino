@@ -63,18 +63,25 @@ void callback(char* topic, byte* payload, unsigned int length) {
   int r, g, b, brightness;
   sscanf(message.c_str(), "%d,%d,%d,%d", &r, &g, &b, &brightness);
 
-  // Giới hạn an toàn
+ // Giới hạn an toàn
   r = constrain(r, 0, 255);
   g = constrain(g, 0, 255);
   b = constrain(b, 0, 255);
   brightness = constrain(brightness, 0, 255);
 
-  strip.setBrightness(brightness);
-  strip.setPixelColor(ledIndex, strip.Color(r, g, b));
+  // ✅ Tính toán màu với brightness cho từng LED riêng lẻ
+  uint8_t adjustedR = (r * brightness) / 255;
+  uint8_t adjustedG = (g * brightness) / 255;
+  uint8_t adjustedB = (b * brightness) / 255;
+
+  // KHÔNG dùng setBrightness() nữa!
+  // strip.setBrightness(brightness);  // ❌ Xóa dòng này
+  
+  strip.setPixelColor(ledIndex, strip.Color(adjustedR, adjustedG, adjustedB));
   strip.show();
 
-  Serial.printf("✅ LED %d -> R:%d G:%d B:%d Bright:%d\n",
-                ledIndex, r, g, b, brightness);
+  Serial.printf("✅ LED %d -> R:%d G:%d B:%d Bright:%d (Adjusted: R:%d G:%d B:%d)\n",
+                ledIndex, r, g, b, brightness, adjustedR, adjustedG, adjustedB);
 }
 
 // ================= MQTT RECONNECT =================

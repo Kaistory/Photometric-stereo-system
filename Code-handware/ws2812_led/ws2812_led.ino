@@ -2,8 +2,8 @@
 #include <Adafruit_NeoPixel.h>
 
 // Cấu hình LED WS2812
-#define LED_PIN 5     // Chân GPIO kết nối với LED (có thể thay đổi)
-#define LED_COUNT 24  // Số lượng LED trong dây
+#define LED_PIN 0     // Chân GPIO kết nối với LED (có thể thay đổi)
+#define LED_COUNT 40  // Số lượng LED trong dây
 #define BRIGHTNESS 50 // Độ sáng (0-255)
 
 // Khởi tạo đối tượng NeoPixel

@@ -1,0 +1,955 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ╔══════════════════════════════════════════════════════════════╗
+    ║   LED Ring BLE Controller — activity_main.xml               ║
+    ║   ESP32-C3 · 40 LEDs · NUS BLE Protocol (idx,R,G,B,bright) ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    BLE Protocol (from BLE-40LED.ino):
+      TX  → "idx,R,G,B,bright"  (e.g. "0,255,0,0,128")
+      RX  ← [status_byte, led_index]  (0x00=OK, 0x01=bad idx, 0x02=bad format)
+
+    LED Layout:
+      Outer ring : LED index 0–23  (24 LEDs)
+      Inner ring : LED index 24–39 (16 LEDs)
+-->
+
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/rootLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    tools:context=".MainActivity">
+
+    <!-- ══════════════════════════════════
+         TOP APP BAR
+         ══════════════════════════════════ -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBarLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:title="LED Ring Control"
+            app:titleTextColor="@color/text_primary"
+            app:navigationIcon="@drawable/ic_bluetooth"
+            app:navigationIconTint="@color/accent_blue"
+            app:menu="@menu/menu_main" />
+
+        <!-- BLE Status Strip -->
+        <LinearLayout
+            android:id="@+id/bleStatusBar"
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:background="@color/bg_dark">
+
+            <View
+                android:id="@+id/bleIndicatorDot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/dot_disconnected" />
+
+            <TextView
+                android:id="@+id/tvBleStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="@string/ble_disconnected"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/tvDeviceName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/accent_blue"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+        </LinearLayout>
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <!-- ══════════════════════════════════
+         MAIN SCROLL CONTENT
+         ══════════════════════════════════ -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/mainScrollView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="96dp">
+
+            <!-- ────────────────────────────────
+                 SECTION 1 · LED RING VISUALIZER
+                 ──────────────────────────────── -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardRingVisual"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="12dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <!-- Section Header -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="LED Ring"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <!-- Selection Mode Chip Group -->
+                        <com.google.android.material.chip.ChipGroup
+                            android:id="@+id/chipGroupSelection"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            app:singleSelection="true"
+                            app:selectionRequired="true">
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipAll"
+                                style="@style/Widget.Material3.Chip.Filter"
+                                android:layout_width="wrap_content"
+                                android:layout_height="32dp"
+                                android:text="All"
+                                android:textSize="11sp"
+                                android:checked="true" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipOuter"
+                                style="@style/Widget.Material3.Chip.Filter"
+                                android:layout_width="wrap_content"
+                                android:layout_height="32dp"
+                                android:text="Outer"
+                                android:textSize="11sp" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipInner"
+                                style="@style/Widget.Material3.Chip.Filter"
+                                android:layout_width="wrap_content"
+                                android:layout_height="32dp"
+                                android:text="Inner"
+                                android:textSize="11sp" />
+
+                        </com.google.android.material.chip.ChipGroup>
+
+                    </LinearLayout>
+
+                    <!-- ★ Custom LED Ring Canvas View ★
+                         Renders 2 concentric rings:
+                           - Outer: 24 LEDs (index 0–23)
+                           - Inner: 16 LEDs (index 24–39)
+                         Each LED tap selects it and highlights it.
+                         Class: com.yourapp.LedRingView -->
+                    <com.yourapp.ui.LedRingView
+                        android:id="@+id/ledRingView"
+                        android:layout_width="match_parent"
+                        android:layout_height="300dp"
+                        android:contentDescription="LED Ring Visualizer" />
+
+                    <!-- Selected LED Info Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="8dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="LED"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tvSelectedIndex"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="#—"
+                            android:textColor="@color/accent_yellow"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:fontFamily="monospace" />
+
+                        <!-- Color Preview Swatch -->
+                        <View
+                            android:id="@+id/colorSwatch"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_marginStart="12dp"
+                            android:background="@drawable/swatch_bg" />
+
+                        <TextView
+                            android:id="@+id/tvSelectedHex"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="#------"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace" />
+
+                        <!-- Ring label badge -->
+                        <TextView
+                            android:id="@+id/tvRingLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:paddingTop="3dp"
+                            android:paddingBottom="3dp"
+                            android:text="OUTER"
+                            android:textColor="@color/accent_blue"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:background="@drawable/badge_ring_bg" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ────────────────────────────────
+                 SECTION 2 · COLOR & BRIGHTNESS CONTROLS
+                 ──────────────────────────────── -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardColorControl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Color &amp; Brightness"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- ── R Slider ── -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="16dp"
+                            android:layout_height="wrap_content"
+                            android:text="R"
+                            android:textColor="@color/slider_red"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/sliderRed"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:layout_marginEnd="8dp"
+                            android:valueFrom="0"
+                            android:valueTo="255"
+                            android:stepSize="1"
+                            android:value="255"
+                            app:thumbColor="@color/slider_red"
+                            app:trackColorActive="@color/slider_red"
+                            app:trackColorInactive="@color/slider_track_inactive"
+                            app:thumbRadius="10dp" />
+
+                        <TextView
+                            android:id="@+id/tvRedValue"
+                            android:layout_width="36dp"
+                            android:layout_height="wrap_content"
+                            android:text="255"
+                            android:textColor="@color/slider_red"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace"
+                            android:gravity="end" />
+
+                    </LinearLayout>
+
+                    <!-- ── G Slider ── -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="16dp"
+                            android:layout_height="wrap_content"
+                            android:text="G"
+                            android:textColor="@color/slider_green"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/sliderGreen"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:layout_marginEnd="8dp"
+                            android:valueFrom="0"
+                            android:valueTo="255"
+                            android:stepSize="1"
+                            android:value="0"
+                            app:thumbColor="@color/slider_green"
+                            app:trackColorActive="@color/slider_green"
+                            app:trackColorInactive="@color/slider_track_inactive"
+                            app:thumbRadius="10dp" />
+
+                        <TextView
+                            android:id="@+id/tvGreenValue"
+                            android:layout_width="36dp"
+                            android:layout_height="wrap_content"
+                            android:text="000"
+                            android:textColor="@color/slider_green"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace"
+                            android:gravity="end" />
+
+                    </LinearLayout>
+
+                    <!-- ── B Slider ── -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="16dp"
+                            android:layout_height="wrap_content"
+                            android:text="B"
+                            android:textColor="@color/slider_blue"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/sliderBlue"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:layout_marginEnd="8dp"
+                            android:valueFrom="0"
+                            android:valueTo="255"
+                            android:stepSize="1"
+                            android:value="0"
+                            app:thumbColor="@color/slider_blue"
+                            app:trackColorActive="@color/slider_blue"
+                            app:trackColorInactive="@color/slider_track_inactive"
+                            app:thumbRadius="10dp" />
+
+                        <TextView
+                            android:id="@+id/tvBlueValue"
+                            android:layout_width="36dp"
+                            android:layout_height="wrap_content"
+                            android:text="000"
+                            android:textColor="@color/slider_blue"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace"
+                            android:gravity="end" />
+
+                    </LinearLayout>
+
+                    <!-- ── Divider ── -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/divider"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="10dp" />
+
+                    <!-- ── Brightness Slider ── -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="16dp">
+
+                        <TextView
+                            android:layout_width="16dp"
+                            android:layout_height="wrap_content"
+                            android:text="☀"
+                            android:textColor="@color/accent_yellow"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/sliderBrightness"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:layout_marginEnd="8dp"
+                            android:valueFrom="0"
+                            android:valueTo="255"
+                            android:stepSize="1"
+                            android:value="128"
+                            app:thumbColor="@color/accent_yellow"
+                            app:trackColorActive="@color/accent_yellow"
+                            app:trackColorInactive="@color/slider_track_inactive"
+                            app:thumbRadius="10dp" />
+
+                        <TextView
+                            android:id="@+id/tvBrightValue"
+                            android:layout_width="36dp"
+                            android:layout_height="wrap_content"
+                            android:text="128"
+                            android:textColor="@color/accent_yellow"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace"
+                            android:gravity="end" />
+
+                    </LinearLayout>
+
+                    <!-- Send Button Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <!-- Quick color presets -->
+                        <LinearLayout
+                            android:id="@+id/colorPresetsRow"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="horizontal">
+
+                            <View android:id="@+id/preset_white"
+                                android:layout_width="28dp" android:layout_height="28dp"
+                                android:layout_marginEnd="6dp"
+                                android:background="@drawable/preset_circle_white" />
+
+                            <View android:id="@+id/preset_red"
+                                android:layout_width="28dp" android:layout_height="28dp"
+                                android:layout_marginEnd="6dp"
+                                android:background="@drawable/preset_circle_red" />
+
+                            <View android:id="@+id/preset_green"
+                                android:layout_width="28dp" android:layout_height="28dp"
+                                android:layout_marginEnd="6dp"
+                                android:background="@drawable/preset_circle_green" />
+
+                            <View android:id="@+id/preset_blue"
+                                android:layout_width="28dp" android:layout_height="28dp"
+                                android:layout_marginEnd="6dp"
+                                android:background="@drawable/preset_circle_blue" />
+
+                            <View android:id="@+id/preset_warm"
+                                android:layout_width="28dp" android:layout_height="28dp"
+                                android:background="@drawable/preset_circle_warm" />
+
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnSendColor"
+                            android:layout_width="wrap_content"
+                            android:layout_height="42dp"
+                            android:text="Send"
+                            android:textSize="13sp"
+                            android:paddingStart="20dp"
+                            android:paddingEnd="20dp"
+                            app:backgroundTint="@color/accent_blue"
+                            app:cornerRadius="12dp"
+                            app:icon="@drawable/ic_send"
+                            app:iconGravity="start" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ────────────────────────────────
+                 SECTION 3 · PRESETS / MODES
+                 ──────────────────────────────── -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardPresets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <!-- Header row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Saved Modes"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <!-- Import button -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnImport"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:text="Import"
+                            android:textSize="11sp"
+                            android:layout_marginEnd="6dp"
+                            app:strokeColor="@color/accent_blue"
+                            app:cornerRadius="10dp"
+                            app:icon="@drawable/ic_import"
+                            app:iconSize="14dp" />
+
+                        <!-- Export button -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnExport"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:text="Export"
+                            android:textSize="11sp"
+                            app:strokeColor="@color/accent_green"
+                            app:cornerRadius="10dp"
+                            app:icon="@drawable/ic_export"
+                            app:iconSize="14dp" />
+
+                    </LinearLayout>
+
+                    <!-- Save current state -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                            app:boxStrokeColor="@color/accent_blue"
+                            app:boxCornerRadiusTopStart="10dp"
+                            app:boxCornerRadiusTopEnd="10dp"
+                            app:boxCornerRadiusBottomStart="10dp"
+                            app:boxCornerRadiusBottomEnd="10dp">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etModeName"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:hint="Mode name..."
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:imeOptions="actionDone"
+                                android:inputType="text" />
+
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnSaveMode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Save"
+                            android:textSize="13sp"
+                            app:backgroundTint="@color/accent_green"
+                            app:cornerRadius="10dp"
+                            app:icon="@drawable/ic_save"
+                            app:iconSize="16dp" />
+
+                    </LinearLayout>
+
+                    <!-- Presets RecyclerView -->
+                    <!-- Renders a horizontal scrollable list of saved modes
+                         Each item: mode name chip + small 40-LED thumbnail + Apply / Delete -->
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/recyclerPresets"
+                        android:layout_width="match_parent"
+                        android:layout_height="100dp"
+                        android:orientation="horizontal"
+                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                        tools:listitem="@layout/item_preset" />
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ────────────────────────────────
+                 SECTION 4 · CAMERA / 3D AI
+                 ──────────────────────────────── -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardCamera"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <!-- Header -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Camera &amp; 3D AI"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipAiBeta"
+                            style="@style/Widget.Material3.Chip.Assist"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="AI Beta"
+                            android:textSize="10sp"
+                            app:chipBackgroundColor="@color/chip_ai_bg" />
+
+                    </LinearLayout>
+
+                    <!-- Camera Preview / Capture Placeholder -->
+                    <FrameLayout
+                        android:id="@+id/cameraPreviewFrame"
+                        android:layout_width="match_parent"
+                        android:layout_height="200dp"
+                        android:background="@drawable/camera_placeholder_bg">
+
+                        <!-- CameraX PreviewView (add in code) -->
+                        <androidx.camera.view.PreviewView
+                            android:id="@+id/cameraPreviewView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:visibility="gone"
+                            app:implementationMode="compatible"
+                            app:scaleType="fillCenter" />
+
+                        <!-- Placeholder when camera not started -->
+                        <LinearLayout
+                            android:id="@+id/cameraPlaceholder"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:orientation="vertical"
+                            android:gravity="center">
+
+                            <ImageView
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:src="@drawable/ic_camera_large"
+                                app:tint="@color/text_secondary"
+                                android:alpha="0.5"
+                                android:contentDescription="Camera placeholder" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:text="Tap to start camera"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp"
+                                android:alpha="0.7" />
+
+                        </LinearLayout>
+
+                        <!-- Captured photo overlay (shown after snap) -->
+                        <ImageView
+                            android:id="@+id/ivCapturedPhoto"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:scaleType="centerCrop"
+                            android:visibility="gone"
+                            android:contentDescription="Captured photo" />
+
+                        <!-- 3D processing overlay -->
+                        <LinearLayout
+                            android:id="@+id/layout3dProcessing"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:orientation="vertical"
+                            android:gravity="center"
+                            android:background="#CC000000"
+                            android:visibility="gone">
+
+                            <ProgressBar
+                                android:id="@+id/progressBar3D"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:indeterminateTint="@color/accent_blue" />
+
+                            <TextView
+                                android:id="@+id/tv3DStatus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                android:text="Generating 3D model..."
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp" />
+
+                        </LinearLayout>
+
+                    </FrameLayout>
+
+                    <!-- Camera action buttons -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:layout_marginTop="12dp">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnToggleCamera"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="44dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:text="Camera"
+                            app:strokeColor="@color/text_secondary"
+                            app:cornerRadius="12dp"
+                            app:icon="@drawable/ic_camera"
+                            app:iconSize="18dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCapturePhoto"
+                            android:layout_width="0dp"
+                            android:layout_height="44dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:text="Capture"
+                            app:backgroundTint="@color/accent_blue"
+                            app:cornerRadius="12dp"
+                            app:icon="@drawable/ic_shutter"
+                            app:iconSize="18dp"
+                            android:enabled="false" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnGenerate3D"
+                            android:layout_width="0dp"
+                            android:layout_height="44dp"
+                            android:layout_weight="1"
+                            android:text="→ 3D"
+                            app:backgroundTint="@color/accent_purple"
+                            app:cornerRadius="12dp"
+                            app:icon="@drawable/ic_3d"
+                            app:iconSize="18dp"
+                            android:enabled="false" />
+
+                    </LinearLayout>
+
+                    <!-- 3D Result viewer placeholder -->
+                    <FrameLayout
+                        android:id="@+id/frame3DResult"
+                        android:layout_width="match_parent"
+                        android:layout_height="180dp"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/frame_3d_bg"
+                        android:visibility="gone">
+
+                        <!-- SceneView / custom 3D viewer injected here in code -->
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:text="3D model will appear here"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                    </FrameLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ────────────────────────────────
+                 SECTION 5 · BLE CONSOLE (collapsible)
+                 ──────────────────────────────── -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardConsole"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:id="@+id/consoleHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="BLE Console"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <ImageView
+                            android:id="@+id/ivConsoleToggle"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:src="@drawable/ic_chevron_down"
+                            app:tint="@color/text_secondary"
+                            android:contentDescription="Toggle console" />
+
+                    </LinearLayout>
+
+                    <!-- Collapsible log area -->
+                    <androidx.core.widget.NestedScrollView
+                        android:id="@+id/consoleScrollView"
+                        android:layout_width="match_parent"
+                        android:layout_height="120dp"
+                        android:layout_marginTop="10dp"
+                        android:visibility="gone"
+                        android:background="@color/bg_dark">
+
+                        <TextView
+                            android:id="@+id/tvConsoleLog"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:padding="8dp"
+                            android:text="BLE log will appear here...\n"
+                            android:textColor="@color/console_text"
+                            android:textSize="10sp"
+                            android:fontFamily="monospace"
+                            android:lineSpacingExtra="2dp" />
+
+                    </androidx.core.widget.NestedScrollView>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- ══════════════════════════════════
+         BOTTOM FAB — CONNECT BLE
+         ══════════════════════════════════ -->
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fabBleConnect"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="20dp"
+        android:text="Connect"
+        app:icon="@drawable/ic_bluetooth"
+        app:backgroundTint="@color/accent_blue"
+        android:textColor="@color/text_primary"
+        app:elevation="6dp" />
+
+    <!-- ══════════════════════════════════
+         BOTTOM NAV BAR
+         ══════════════════════════════════ -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/bg_surface"
+        app:itemIconTint="@color/nav_icon_tint"
+        app:itemTextColor="@color/nav_icon_tint"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/menu_bottom_nav"
+        app:elevation="8dp" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

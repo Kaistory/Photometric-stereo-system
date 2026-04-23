@@ -15,9 +15,25 @@ import java.nio.channels.FileChannel
 import kotlin.math.sqrt
 
 /**
- * TransUNet Photometric Stereo inferencer.
+ * Raw photometric stereo inference result.
  *
- * Model input:  NCHW FP32 [1, 3, 512, 512] — 3 grayscale images stacked as channels.
+ * @property visualization RGB bitmap of the normal map for on-screen display (512x512 ARGB).
+ * @property rawNormal Flat float32 array in HWC layout: for pixel (h, w) the xyz values are
+ *   rawNormal[(h * width + w) * 3 + {0,1,2}]. Values are already L2-normalized, range roughly [-1, 1].
+ * @property width Width of the result (same as height for this model).
+ * @property height Height of the result.
+ */
+data class PSResult(
+    val visualization: Bitmap,
+    val rawNormal: FloatArray,
+    val width: Int,
+    val height: Int,
+)
+
+/**
+ * TransUNet Photometric Stereo inferencer (INT8-quantized model, 14MB).
+ *
+ * Model input:  NHWC FP32 [1, 512, 512, 3] — 3 grayscale images interleaved per pixel.
  *               Each image pre-normalized to zero-mean, unit-std.
  * Model output: NCHW FP32 [1, 3, 512, 512] — normal map (nx, ny, nz) in roughly [-1, 1].
  */
@@ -86,9 +102,9 @@ class PSInferencer(context: Context) : AutoCloseable {
     /**
      * Predict normal map from 3 grayscale bitmaps (each exactly 512x512).
      *
-     * @return RGB bitmap visualization of the normal map (512x512).
+     * @return [PSResult] with both RGB visualization bitmap and raw float32 normal map (HWC).
      */
-    fun predict(bitmaps: List<Bitmap>): Bitmap {
+    fun predict(bitmaps: List<Bitmap>): PSResult {
         require(bitmaps.size == CHANNELS) { "Need exactly $CHANNELS images, got ${bitmaps.size}" }
         require(bitmaps.all { it.width == INPUT_SIZE && it.height == INPUT_SIZE }) {
             "All images must be ${INPUT_SIZE}x$INPUT_SIZE"
@@ -103,19 +119,26 @@ class PSInferencer(context: Context) : AutoCloseable {
         val elapsedMs = (System.nanoTime() - start) / 1_000_000
         Log.i(TAG, "Inference took ${elapsedMs}ms")
 
-        return tensorToNormalBitmap(output)
+        return buildResult(output)
     }
 
-    /** Convert 3 bitmaps to tensor [1, 3, 512, 512] with per-image zero-mean unit-std. */
+    /**
+     * Convert 3 bitmaps to tensor [1, 512, 512, 3] NHWC with per-image zero-mean unit-std.
+     * Layout: for each pixel index i, emit (img1[i], img2[i], img3[i]) interleaved.
+     */
     private fun buildInputTensor(bitmaps: List<Bitmap>): ByteBuffer {
         val pixelCount = INPUT_SIZE * INPUT_SIZE
-        val buf = ByteBuffer.allocateDirect(4 * 1 * CHANNELS * pixelCount)
+        val buf = ByteBuffer.allocateDirect(4 * 1 * pixelCount * CHANNELS)
             .order(ByteOrder.nativeOrder())
 
-        bitmaps.forEach { bitmap ->
-            val grayscale = bitmapToGrayscaleFloats(bitmap)
-            val normalized = zeroMeanUnitStd(grayscale)
-            normalized.forEach { buf.putFloat(it) }
+        val c0 = zeroMeanUnitStd(bitmapToGrayscaleFloats(bitmaps[0]))
+        val c1 = zeroMeanUnitStd(bitmapToGrayscaleFloats(bitmaps[1]))
+        val c2 = zeroMeanUnitStd(bitmapToGrayscaleFloats(bitmaps[2]))
+
+        for (i in 0 until pixelCount) {
+            buf.putFloat(c0[i])
+            buf.putFloat(c1[i])
+            buf.putFloat(c2[i])
         }
         buf.rewind()
         return buf
@@ -152,8 +175,14 @@ class PSInferencer(context: Context) : AutoCloseable {
         return out
     }
 
-    /** Convert model output [1, 3, 512, 512] to RGB bitmap via per-pixel L2 norm + [-1,1]→[0,255]. */
-    private fun tensorToNormalBitmap(output: ByteBuffer): Bitmap {
+    /**
+     * Convert model output [1, 3, 512, 512] NCHW to:
+     *   - Normalized HWC float array (ready for .npy export, matches Python reference layout)
+     *   - RGB Bitmap for on-screen display
+     *
+     * Applies per-pixel L2 normalization and maps each unit vector component [-1,1] → [0,255].
+     */
+    private fun buildResult(output: ByteBuffer): PSResult {
         output.rewind()
         val pixelCount = INPUT_SIZE * INPUT_SIZE
         val nx = FloatArray(pixelCount)
@@ -163,12 +192,17 @@ class PSInferencer(context: Context) : AutoCloseable {
         for (i in 0 until pixelCount) ny[i] = output.float
         for (i in 0 until pixelCount) nz[i] = output.float
 
+        val hwc = FloatArray(pixelCount * CHANNELS)
         val pixels = IntArray(pixelCount)
         for (i in 0 until pixelCount) {
             val norm = sqrt(nx[i] * nx[i] + ny[i] * ny[i] + nz[i] * nz[i]) + EPS
             val x = nx[i] / norm
             val y = ny[i] / norm
             val z = nz[i] / norm
+            val base = i * CHANNELS
+            hwc[base] = x
+            hwc[base + 1] = y
+            hwc[base + 2] = z
             val r = ((x + 1f) * 0.5f * 255f).coerceIn(0f, 255f).toInt()
             val g = ((y + 1f) * 0.5f * 255f).coerceIn(0f, 255f).toInt()
             val b = ((z + 1f) * 0.5f * 255f).coerceIn(0f, 255f).toInt()
@@ -176,7 +210,7 @@ class PSInferencer(context: Context) : AutoCloseable {
         }
         val bitmap = Bitmap.createBitmap(INPUT_SIZE, INPUT_SIZE, Bitmap.Config.ARGB_8888)
         bitmap.setPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
-        return bitmap
+        return PSResult(visualization = bitmap, rawNormal = hwc, width = INPUT_SIZE, height = INPUT_SIZE)
     }
 
     override fun close() {

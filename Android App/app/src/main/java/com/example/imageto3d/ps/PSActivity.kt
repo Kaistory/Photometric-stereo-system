@@ -27,14 +27,20 @@ import com.example.imageto3d.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Photometric Stereo capture + inference flow.
  *
  * Flow:
- *   1. User captures 3 grayscale images under 3 different light directions.
- *   2. User taps "Predict" → model runs on-device (~200-300ms on flagship GPU).
- *   3. Result normal map (RGB visualization) is shown over the preview area.
+ *   1. Capture 3 grayscale images under 3 different light directions.
+ *   2. Predict → model runs on-device (TFLite INT8, 14MB).
+ *   3. Save → writes inputs + raw .npy + RGB .png to app external storage
+ *             so Khải can compute angular error against Python reference.
  */
 class PSActivity : AppCompatActivity() {
 
@@ -46,6 +52,7 @@ class PSActivity : AppCompatActivity() {
     private lateinit var btnCapture: Button
     private lateinit var btnPredict: Button
     private lateinit var btnReset: Button
+    private lateinit var btnSave: Button
     private lateinit var btnBack: ImageButton
     private val thumbViews = arrayOfNulls<ImageView>(3)
 
@@ -54,6 +61,7 @@ class PSActivity : AppCompatActivity() {
 
     private val captured = mutableListOf<Bitmap>()
     private val thumbnails = mutableListOf<Bitmap>()
+    private var lastResult: PSResult? = null
 
     private val requestCameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -85,6 +93,7 @@ class PSActivity : AppCompatActivity() {
         btnCapture = findViewById(R.id.btnCapture)
         btnPredict = findViewById(R.id.btnPredict)
         btnReset = findViewById(R.id.btnReset)
+        btnSave = findViewById(R.id.btnSave)
         btnBack = findViewById(R.id.btnBack)
         thumbViews[0] = findViewById(R.id.thumb1)
         thumbViews[1] = findViewById(R.id.thumb2)
@@ -95,6 +104,7 @@ class PSActivity : AppCompatActivity() {
         btnCapture.setOnClickListener { takePhoto() }
         btnPredict.setOnClickListener { runInference() }
         btnReset.setOnClickListener { resetState() }
+        btnSave.setOnClickListener { saveResult() }
         btnBack.setOnClickListener { finish() }
     }
 
@@ -105,7 +115,7 @@ class PSActivity : AppCompatActivity() {
             }
             result.onSuccess {
                 inferencer = it
-                val mode = if (it.isUsingGpu) "GPU (FP16)" else "CPU"
+                val mode = if (it.isUsingGpu) "GPU" else "CPU"
                 tvStatus.text = "Model sẵn sàng · $mode"
             }.onFailure {
                 Log.e(TAG, "Failed to load model", it)
@@ -198,17 +208,19 @@ class PSActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.Default) {
                 runCatching {
                     val started = System.nanoTime()
-                    val bitmap = engine.predict(inputs)
+                    val psResult = engine.predict(inputs)
                     val ms = (System.nanoTime() - started) / 1_000_000
-                    bitmap to ms
+                    psResult to ms
                 }
             }
             setBusy(false)
-            result.onSuccess { (bitmap, ms) ->
-                resultView.setImageBitmap(bitmap)
+            result.onSuccess { (psResult, ms) ->
+                lastResult = psResult
+                resultView.setImageBitmap(psResult.visualization)
                 resultView.visibility = View.VISIBLE
-                tvInstruction.text = "Kết quả normal map"
+                tvInstruction.text = "Kết quả normal map — nhấn Save để xuất file"
                 tvStatus.text = "Inference: ${ms}ms · ${if (engine.isUsingGpu) "GPU" else "CPU"}"
+                btnSave.isEnabled = true
             }.onFailure {
                 Log.e(TAG, "Inference failed", it)
                 Toast.makeText(this@PSActivity, "Lỗi inference: ${it.message}", Toast.LENGTH_LONG).show()
@@ -217,11 +229,75 @@ class PSActivity : AppCompatActivity() {
         }
     }
 
+    private fun saveResult() {
+        val result = lastResult ?: run {
+            Toast.makeText(this, "Chưa có kết quả để lưu", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (captured.size != 3) return
+
+        setBusy(true)
+        val inputs = captured.toList()
+
+        lifecycleScope.launch {
+            val savePath = withContext(Dispatchers.IO) {
+                runCatching { writeExportFolder(inputs, result) }
+            }
+            setBusy(false)
+            savePath.onSuccess { folder ->
+                Log.i(TAG, "Saved outputs to: $folder")
+                Toast.makeText(
+                    this@PSActivity,
+                    "Đã lưu vào:\n$folder",
+                    Toast.LENGTH_LONG
+                ).show()
+                tvStatus.text = "Đã lưu · ${folder.substringAfterLast('/')}"
+            }.onFailure {
+                Log.e(TAG, "Save failed", it)
+                Toast.makeText(this@PSActivity, "Lỗi lưu: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * Write the 3 input grayscale pngs, the raw HWC float32 normal map as .npy,
+     * and the RGB visualization png to a timestamped folder in app external storage.
+     * Returns the absolute folder path.
+     */
+    private fun writeExportFolder(inputs: List<Bitmap>, result: PSResult): String {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val parent = getExternalFilesDir(null) ?: filesDir
+        val folder = File(parent, "ps_output_$timestamp")
+        if (!folder.mkdirs() && !folder.isDirectory) {
+            error("Cannot create folder: ${folder.absolutePath}")
+        }
+
+        inputs.forEachIndexed { i, bmp ->
+            val f = File(folder, "input_${i + 1}.png")
+            FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+
+        val pngFile = File(folder, "predicted_normal.png")
+        FileOutputStream(pngFile).use {
+            result.visualization.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+
+        val npyFile = File(folder, "predicted_normal.npy")
+        NumpyWriter.saveFloat32(
+            destination = npyFile,
+            data = result.rawNormal,
+            shape = intArrayOf(result.height, result.width, 3),
+        )
+
+        return folder.absolutePath
+    }
+
     private fun setBusy(busy: Boolean) {
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         btnCapture.isEnabled = !busy && captured.size < 3
         btnPredict.isEnabled = !busy && captured.size == 3
         btnReset.isEnabled = !busy
+        btnSave.isEnabled = !busy && lastResult != null
     }
 
     private fun resetState() {
@@ -233,6 +309,8 @@ class PSActivity : AppCompatActivity() {
         resultView.visibility = View.GONE
         resultView.setImageBitmap(null)
         btnCapture.isEnabled = true
+        btnSave.isEnabled = false
+        lastResult = null
         updateInstruction()
         tvStatus.text = ""
     }

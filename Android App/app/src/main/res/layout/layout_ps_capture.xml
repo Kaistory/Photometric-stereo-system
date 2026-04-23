@@ -128,7 +128,8 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Chụp lại" />
+            android:text="Chụp lại"
+            android:textAllCaps="false" />
 
         <Button
             android:id="@+id/btnCapture"
@@ -136,7 +137,8 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="Chụp" />
+            android:text="Chụp"
+            android:textAllCaps="false" />
 
         <Button
             android:id="@+id/btnPredict"
@@ -145,7 +147,18 @@
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:enabled="false"
-            android:text="Predict" />
+            android:text="Predict"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/btnSave"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:enabled="false"
+            android:text="Save"
+            android:textAllCaps="false" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -17,6 +18,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.example.imageto3d.ps.PSActivity
 class MainActivity : AppCompatActivity() {
 
     private lateinit var btnConnectBle: Button
@@ -45,6 +47,10 @@ class MainActivity : AppCompatActivity() {
                 // Nếu chưa có quyền -> Yêu cầu cấp quyền
                 requestBluetoothPermissions()
             }
+        }
+
+        findViewById<Button>(R.id.btnLaunchPS).setOnClickListener {
+            startActivity(Intent(this, PSActivity::class.java))
         }
 
     }

@@ -48,6 +48,14 @@
         app:layout_constraintTop_toBottomOf="@+id/led_visualizer_container"
         tools:layout_editor_absoluteX="-113dp">
 
+        <Button
+            android:id="@+id/btnLaunchPS"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Photometric Stereo (Chụp + Dự đoán Normal Map)"
+            android:textAllCaps="false"
+            android:textStyle="bold" />
+
         <!--        <include layout="@layout/item_slider_red" />-->
         <!--        <include layout="@layout/item_slider_green" />-->
         <!--        <include layout="@layout/item_slider_blue" />-->
